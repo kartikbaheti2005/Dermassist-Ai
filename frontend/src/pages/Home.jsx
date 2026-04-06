@@ -310,7 +310,7 @@ const ScanTab = ({ token }) => {
               </motion.button>
             </div>
             <ResultCard result={result} />
-            <ExplainableAI diagnosis={result.diagnosis} allScores={result.all_scores} heatmapOverlay={result.heatmap_overlay} heatmapOnly={result.heatmap_only} />
+            <ExplainableAI diagnosis={result.diagnosis} allScores={result.all_scores} heatmapOverlay={result.heatmap_overlay} heatmapOnly={result.heatmap_only} usingStage2={result.using_stage2 && result.stage2_confidence > result.confidence} stage2Diagnosis={result.stage2_diagnosis} />
             <RecommendationPanel riskLevel={result.risk_level} />
           </motion.div>
         )}

@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { useState } from 'react'
-import { Circle, Palette, Ruler, GitMerge, AlertTriangle, CheckCircle, Info, ChevronDown, ChevronUp, Brain } from 'lucide-react'
+import { Circle, Palette, Ruler, GitMerge, AlertTriangle, CheckCircle, Info, ChevronDown, ChevronUp, Brain, FlaskConical } from 'lucide-react'
 
 // ─── Per-class knowledge base ──────────────────────────────────────────────
 const CLASS_KNOWLEDGE = {
@@ -117,6 +117,23 @@ const CLASS_KNOWLEDGE = {
       'or size over time should be checked by a dermatologist.',
     is_cancer: false,
   },
+  // Stage 2 fallback
+  stage2: {
+    features: [
+      { icon: Palette, text: 'Skin texture patterns analyzed across 23 disease categories' },
+      { icon: Circle,  text: 'Color distribution and lesion morphology evaluated' },
+      { icon: GitMerge,text: 'Pattern matching against clinical skin disease images' },
+      { icon: Ruler,   text: 'Lesion characteristics compared to training dataset' },
+    ],
+    reasoning:
+      'This result was produced by the Stage 2 general skin disease classifier, which analyzes 23 ' +
+      'common skin conditions beyond cancer screening. The model detected visual patterns consistent ' +
+      'with this condition based on texture, color, and morphological features.',
+    what_it_is:
+      'This is a general skin condition identified by our secondary disease classifier. Please consult ' +
+      'a qualified dermatologist for proper diagnosis, as many skin conditions have similar appearances.',
+    is_cancer: false,
+  },
 }
 
 const NAME_MAP = {
@@ -130,8 +147,8 @@ const RISK_MAP = {
 }
 
 const RISK_COLORS = {
-  'High Risk':     { bar: 'bg-red-500',   badge: 'bg-red-100 text-red-700 border-red-200' },
-  'Moderate Risk': { bar: 'bg-amber-400', badge: 'bg-amber-100 text-amber-700 border-amber-200' },
+  'High Risk':     { bar: 'bg-red-500',     badge: 'bg-red-100 text-red-700 border-red-200' },
+  'Moderate Risk': { bar: 'bg-amber-400',   badge: 'bg-amber-100 text-amber-700 border-amber-200' },
   'Low Risk':      { bar: 'bg-emerald-500', badge: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
 }
 
@@ -166,14 +183,20 @@ const ConfidenceBar = ({ label, score, risk, delay }) => {
 }
 
 // ─── Main Component ────────────────────────────────────────────────────────
-const ExplainableAI = ({ diagnosis, allScores, heatmapOverlay, heatmapOnly }) => {
+const ExplainableAI = ({ diagnosis, allScores, heatmapOverlay, heatmapOnly, usingStage2, stage2Diagnosis }) => {
   const [showDifferential, setShowDifferential] = useState(false)
   const [heatmapView, setHeatmapView] = useState('overlay')
 
-  const info = CLASS_KNOWLEDGE[diagnosis] || CLASS_KNOWLEDGE['nv']
+  // Use stage2 knowledge if stage2 is primary, otherwise use stage1 knowledge
+  const diagKey = usingStage2 && stage2Diagnosis
+    ? 'stage2'
+    : (diagnosis || 'nv').toLowerCase() === 'ak' ? 'akiec'
+    : (diagnosis || 'nv').toLowerCase()
+
+  const info     = CLASS_KNOWLEDGE[diagKey] || CLASS_KNOWLEDGE['stage2']
   const features = info.features
 
-  // Build differential: all classes sorted by score, excluding the primary diagnosis
+  // Build differential from Stage 1 scores
   const differential = allScores
     ? Object.entries(allScores)
         .filter(([cls]) => cls !== diagnosis)
@@ -182,13 +205,14 @@ const ExplainableAI = ({ diagnosis, allScores, heatmapOverlay, heatmapOnly }) =>
     : []
 
   const primaryScore = allScores ? allScores[diagnosis] : null
+  const displayName  = usingStage2 && stage2Diagnosis ? stage2Diagnosis : (NAME_MAP[diagnosis] || diagnosis)
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay: 0.2 }}
-      className="bg-white rounded-2xl shadow-lg border border-blue-50 p-8 my-8 space-y-8"
+      className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-blue-50 dark:border-gray-700 p-8 my-8 space-y-8"
     >
 
       {/* ── Grad-CAM Heatmap ── */}
@@ -200,15 +224,15 @@ const ExplainableAI = ({ diagnosis, allScores, heatmapOverlay, heatmapOnly }) =>
           className="space-y-3"
         >
           <div className="flex items-center justify-between">
-            <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
+            <h4 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
               AI Attention Heatmap
             </h4>
-            <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
+            <div className="flex gap-1 bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
               <button
                 onClick={() => setHeatmapView('overlay')}
                 className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
                   heatmapView === 'overlay'
-                    ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm'
+                    ? 'bg-white dark:bg-gray-600 text-blue-600 shadow-sm'
                     : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'
                 }`}
               >
@@ -218,7 +242,7 @@ const ExplainableAI = ({ diagnosis, allScores, heatmapOverlay, heatmapOnly }) =>
                 onClick={() => setHeatmapView('heatmap')}
                 className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
                   heatmapView === 'heatmap'
-                    ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm'
+                    ? 'bg-white dark:bg-gray-600 text-blue-600 shadow-sm'
                     : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'
                 }`}
               >
@@ -229,9 +253,10 @@ const ExplainableAI = ({ diagnosis, allScores, heatmapOverlay, heatmapOnly }) =>
 
           <div className="relative rounded-xl overflow-hidden border border-blue-100 dark:border-blue-900/30">
             <img
-              src={heatmapView === 'overlay' ? heatmapOverlay : heatmapOnly}
+              src={heatmapView === 'overlay' ? heatmapOverlay : (heatmapOnly || heatmapOverlay)}
               alt="Grad-CAM heatmap"
-              className="w-full object-cover rounded-xl"
+              className="w-full object-cover rounded-xl max-h-80"
+              style={{ objectFit: 'contain', background: '#111' }}
             />
             <div className="absolute bottom-2 right-2 flex items-center gap-2 bg-black/60 rounded-lg px-3 py-1.5">
               <div className="flex gap-0.5">
@@ -244,26 +269,34 @@ const ExplainableAI = ({ diagnosis, allScores, heatmapOverlay, heatmapOnly }) =>
           </div>
 
           <p className="text-xs text-gray-400 dark:text-gray-500 leading-relaxed">
-            <strong className="text-gray-600 dark:text-gray-300">Red/yellow regions</strong> = areas the AI focused on most when making this prediction.{' '}
-            <strong className="text-gray-600 dark:text-gray-300">Blue regions</strong> = areas that had little influence on the result.
+            <strong className="text-gray-600 dark:text-gray-300">Red/yellow</strong> = areas the AI focused on most.{' '}
+            <strong className="text-gray-600 dark:text-gray-300">Blue</strong> = areas with little influence on the result.
+            {usingStage2 && (
+              <span className="block mt-1 text-blue-500">Note: Heatmap shows Stage 1 attention areas. Stage 2 classification used image-level features.</span>
+            )}
           </p>
         </motion.div>
       )}
 
       {/* ── Header ── */}
       <div className="flex items-center gap-3">
-        <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
-          <Brain className="w-5 h-5 text-blue-600" />
+        <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-xl flex items-center justify-center flex-shrink-0">
+          {usingStage2
+            ? <FlaskConical className="w-5 h-5 text-blue-600" />
+            : <Brain className="w-5 h-5 text-blue-600" />
+          }
         </div>
         <div>
-          <h3 className="text-2xl font-bold text-gray-900">Why the AI thinks this</h3>
-          <p className="text-gray-500 text-sm mt-0.5">Visual pattern analysis from your image</p>
+          <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Why the AI thinks this</h3>
+          <p className="text-gray-500 dark:text-gray-400 text-sm mt-0.5">
+            {usingStage2 ? 'Stage 2 general disease analysis' : 'Visual pattern analysis from your image'}
+          </p>
         </div>
       </div>
 
       {/* ── What the AI detected ── */}
       <div>
-        <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
+        <h4 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
           Key visual features detected
         </h4>
         <div className="space-y-3">
@@ -275,12 +308,12 @@ const ExplainableAI = ({ diagnosis, allScores, heatmapOverlay, heatmapOnly }) =>
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.3 + index * 0.08 }}
-                className="flex items-start gap-4 p-4 bg-blue-50 rounded-xl"
+                className="flex items-start gap-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl"
               >
-                <div className="w-9 h-9 bg-white rounded-full flex items-center justify-center flex-shrink-0 shadow-sm">
+                <div className="w-9 h-9 bg-white dark:bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm">
                   <Icon className="w-4 h-4 text-blue-600" />
                 </div>
-                <p className="text-gray-700 text-sm pt-1.5 leading-relaxed">{feature.text}</p>
+                <p className="text-gray-700 dark:text-gray-300 text-sm pt-1.5 leading-relaxed">{feature.text}</p>
               </motion.div>
             )
           })}
@@ -292,7 +325,7 @@ const ExplainableAI = ({ diagnosis, allScores, heatmapOverlay, heatmapOnly }) =>
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.6 }}
-        className={`p-5 rounded-xl border ${info.is_cancer ? 'bg-red-50 border-red-100' : 'bg-emerald-50 border-emerald-100'}`}
+        className={`p-5 rounded-xl border ${info.is_cancer ? 'bg-red-50 border-red-100 dark:bg-red-900/20 dark:border-red-900/40' : 'bg-emerald-50 border-emerald-100 dark:bg-emerald-900/20 dark:border-emerald-900/40'}`}
       >
         <div className="flex gap-3">
           <div className="flex-shrink-0 mt-0.5">
@@ -302,10 +335,10 @@ const ExplainableAI = ({ diagnosis, allScores, heatmapOverlay, heatmapOnly }) =>
             }
           </div>
           <div className="space-y-2">
-            <p className={`font-semibold text-sm ${info.is_cancer ? 'text-red-700' : 'text-emerald-700'}`}>
+            <p className={`font-semibold text-sm ${info.is_cancer ? 'text-red-700 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>
               {info.is_cancer ? 'Why the AI considers this a concern' : 'Why the AI considers this benign'}
             </p>
-            <p className="text-gray-700 text-sm leading-relaxed">{info.reasoning}</p>
+            <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed">{info.reasoning}</p>
           </div>
         </div>
       </motion.div>
@@ -315,38 +348,38 @@ const ExplainableAI = ({ diagnosis, allScores, heatmapOverlay, heatmapOnly }) =>
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.7 }}
-        className="p-5 bg-gray-50 rounded-xl border border-gray-100"
+        className="p-5 bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-gray-100 dark:border-gray-700"
       >
         <div className="flex gap-3">
           <Info className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
           <div className="space-y-1">
-            <p className="font-semibold text-sm text-gray-800">What is {NAME_MAP[diagnosis]}?</p>
-            <p className="text-gray-600 text-sm leading-relaxed">{info.what_it_is}</p>
+            <p className="font-semibold text-sm text-gray-800 dark:text-gray-200">What is {displayName}?</p>
+            <p className="text-gray-600 dark:text-gray-400 text-sm leading-relaxed">{info.what_it_is}</p>
           </div>
         </div>
       </motion.div>
 
       {/* ── Confidence breakdown ── */}
-      {allScores && (
+      {allScores && primaryScore !== null && !usingStage2 && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.75 }}
         >
-          <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">
+          <h4 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-4">
             AI Confidence — Primary diagnosis
           </h4>
           <ConfidenceBar
-            label={NAME_MAP[diagnosis]}
+            label={NAME_MAP[diagnosis] || diagnosis}
             score={primaryScore}
-            risk={RISK_MAP[diagnosis]}
+            risk={RISK_MAP[diagnosis] || 'Low Risk'}
             delay={0.8}
           />
         </motion.div>
       )}
 
-      {/* ── Differential diagnosis ── */}
-      {differential.length > 0 && (
+      {/* ── Differential diagnosis (Stage 1 only) ── */}
+      {differential.length > 0 && !usingStage2 && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -354,11 +387,11 @@ const ExplainableAI = ({ diagnosis, allScores, heatmapOverlay, heatmapOnly }) =>
         >
           <button
             onClick={() => setShowDifferential(v => !v)}
-            className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 rounded-xl border border-gray-200 transition-colors duration-200"
+            className="w-full flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl border border-gray-200 dark:border-gray-600 transition-colors duration-200"
           >
             <div className="text-left">
-              <p className="font-semibold text-gray-800 text-sm">Other possibilities considered</p>
-              <p className="text-xs text-gray-500 mt-0.5">See what else the AI evaluated and ruled out</p>
+              <p className="font-semibold text-gray-800 dark:text-gray-200 text-sm">Other possibilities considered</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">See what else the AI evaluated and ruled out</p>
             </div>
             {showDifferential
               ? <ChevronUp className="w-5 h-5 text-gray-400" />
@@ -381,7 +414,7 @@ const ExplainableAI = ({ diagnosis, allScores, heatmapOverlay, heatmapOnly }) =>
                       key={cls}
                       label={NAME_MAP[cls] || cls}
                       score={score}
-                      risk={RISK_MAP[cls]}
+                      risk={RISK_MAP[cls] || 'Low Risk'}
                       delay={i * 0.08}
                     />
                   ))}
@@ -396,8 +429,8 @@ const ExplainableAI = ({ diagnosis, allScores, heatmapOverlay, heatmapOnly }) =>
       )}
 
       {/* ── Disclaimer ── */}
-      <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-xl">
-        <p className="text-sm text-gray-700 leading-relaxed">
+      <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800/40 rounded-xl">
+        <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
           <strong>Important:</strong> This analysis is based on image pattern recognition using the ISIC dataset.
           It is not a medical diagnosis. Always consult a qualified dermatologist for professional evaluation,
           especially for any High Risk result.

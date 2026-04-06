@@ -29,6 +29,7 @@ const Navbar = () => {
     { path: '/outbreak',       label: 'Outbreak Alerts', icon: Globe, desc: 'Live disease intelligence' },
     { path: '/health-records', label: 'Health Records',  icon: Heart, desc: 'Your medical profile'      },
     { path: '/queue',          label: 'My Queue',        icon: Users, desc: "Today's queue position"    },
+    { path: '/lesion-tracker', label: 'Lesion Tracker', icon: Activity, desc: 'Track mole changes over time' },
   ]
 
   useEffect(() => {

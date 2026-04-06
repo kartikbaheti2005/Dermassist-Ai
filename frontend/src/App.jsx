@@ -23,6 +23,7 @@ import HealthChatbotPage from './pages/HealthChatbotPage'       // PS-02
 import OutbreakPage from './pages/OutbreakPage'                 // PS-05
 import HealthRecordsPage from './pages/HealthRecordsPage'       // PS-06
 import QueuePage from './pages/QueuePage'                       // PS-07
+import LesionTrackerPage from './pages/LesionTrackerPage'           // Lesion Tracker
 
 const Spinner = () => (
   <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-900">

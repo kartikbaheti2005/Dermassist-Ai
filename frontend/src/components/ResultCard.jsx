@@ -2,7 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useState } from 'react'
 import {
   AlertCircle, CheckCircle, AlertTriangle, Phone, Calendar,
-  Heart, HelpCircle, ChevronDown, ChevronUp, Activity, Microscope
+  Heart, HelpCircle, ChevronDown, ChevronUp, Activity, Microscope, FlaskConical
 } from 'lucide-react'
 
 const ConfidenceTooltip = () => {
@@ -42,6 +42,7 @@ const DIAGNOSIS_MESSAGES = {
   df:    { headline: "Low concern, but a checkup is a good idea.", message: `The AI detected patterns consistent with a Dermatofibroma — a benign fibrous nodule that is almost always harmless. These are very common and rarely require any treatment. However, since skin conditions can sometimes resemble each other, it is always a good idea to have a dermatologist confirm this.`, action: "Schedule a routine checkup when convenient — no rush, but don't skip it.", urgency: "medium" },
   vasc:  { headline: "Likely harmless, but keep an eye on it.", message: `The AI identified visual features consistent with a Vascular Lesion — which includes common, benign conditions like cherry angiomas or hemangiomas. The vast majority are completely harmless. We recommend showing this to a dermatologist at your next checkup, especially if the lesion has recently changed.`, action: "Mention this to a dermatologist at your next routine visit.", urgency: "medium" },
   nv:    { headline: "You're in the clear — nothing to worry about.", message: `Great news! The AI has analyzed your image and the results look reassuring. The lesion appears to be a Melanocytic Nevus — a common, ordinary mole. This is one of the most benign findings possible. Just continue wearing sunscreen, avoid excessive sun exposure, and do a self-check every few months.`, action: "No action needed. Continue regular self-checks and use sunscreen.", urgency: "low" },
+  stage2_default: { headline: "General skin condition detected.", message: `The AI has analyzed your image through our general skin disease classifier. This condition is not related to skin cancer. Please consult a dermatologist for proper diagnosis and treatment options.`, action: "Consult a dermatologist for proper evaluation and treatment.", urgency: "medium" },
 }
 
 const URGENCY_CONFIG = {
@@ -56,6 +57,37 @@ const NAME_MAP = {
   MEL: 'Melanoma', BCC: 'Basal Cell Carcinoma', AK: 'Actinic Keratosis',
   SCC: 'Squamous Cell Carcinoma', BKL: 'Benign Keratosis',
   DF: 'Dermatofibroma', NV: 'Melanocytic Nevus', VASC: 'Vascular Lesion',
+}
+
+// Shorten long Stage 2 class names for display
+const shortenStage2Name = (name) => {
+  if (!name) return name
+  const map = {
+    'Acne and Rosacea Photos': 'Acne & Rosacea',
+    'Actinic Keratosis Basal Cell Carcinoma and other Malignant Lesions': 'Actinic Keratosis / BCC',
+    'Atopic Dermatitis Photos': 'Atopic Dermatitis',
+    'Bullous Disease Photos': 'Bullous Disease',
+    'Cellulitis Impetigo and other Bacterial Infections': 'Bacterial Infection',
+    'Eczema Photos': 'Eczema',
+    'Exanthems and Drug Eruptions': 'Drug Eruptions',
+    'Hair Loss Photos Alopecia and other Hair Diseases': 'Hair Loss / Alopecia',
+    'Herpes HPV and other STDs Photos': 'Herpes / HPV / STDs',
+    'Light Diseases and Disorders of Pigmentation': 'Pigmentation Disorder',
+    'Lupus and other Connective Tissue diseases': 'Lupus',
+    'Melanoma Skin Cancer Nevi and Moles': 'Melanoma / Nevi',
+    'Nail Fungus and other Nail Disease': 'Nail Fungus',
+    'Poison Ivy Photos and other Contact Dermatitis': 'Contact Dermatitis',
+    'Psoriasis pictures Lichen Planus and related diseases': 'Psoriasis / Lichen Planus',
+    'Scabies Lyme Disease and other Infestations and Bites': 'Scabies / Bites',
+    'Seborrheic Keratoses and other Benign Tumors': 'Seborrheic Keratosis',
+    'Systemic Disease': 'Systemic Disease',
+    'Tinea Ringworm Candidiasis and other Fungal Infections': 'Fungal Infection',
+    'Urticaria Hives': 'Urticaria / Hives',
+    'Vascular Tumors': 'Vascular Tumors',
+    'Vasculitis Photos': 'Vasculitis',
+    'Warts Molluscum and other Viral Infections': 'Warts / Viral Infection',
+  }
+  return map[name] || name
 }
 
 const ResultCard = ({ result }) => {
@@ -96,16 +128,34 @@ const ResultCard = ({ result }) => {
     )
   }
 
-  const diagRaw       = (result.diagnosis || 'nv').toLowerCase()
-  const diagKey       = diagRaw === 'ak' ? 'akiec' : diagRaw === 'scc' ? 'scc' : ['mel','bcc','akiec','bkl','df','nv','vasc'].includes(diagRaw) ? diagRaw : 'nv'
-  const diagnosisInfo = DIAGNOSIS_MESSAGES[diagKey] || DIAGNOSIS_MESSAGES['nv']
-  const backendRisk   = result.risk_level || ''
-  const urgency       = backendRisk === 'High Risk' ? 'high' : backendRisk === 'Moderate Risk' ? 'medium' : backendRisk === 'Low Risk' ? 'low' : diagnosisInfo.urgency
-  const config        = URGENCY_CONFIG[urgency] || URGENCY_CONFIG['medium']
-  const Icon          = config.icon
-  const confidence    = (result.confidence * 100).toFixed(1)
-  const diagnosisName = result.diagnosis_name || NAME_MAP[result.diagnosis] || result.diagnosis
-  const confLevel     = parseFloat(confidence) >= 80 ? 'high' : parseFloat(confidence) >= 60 ? 'medium' : 'low'
+  // ── Determine if Stage 2 should be shown as primary ──────────────────────
+  const useStage2AsPrimary = result.using_stage2 &&
+    result.stage2_diagnosis &&
+    result.stage2_confidence > result.confidence
+
+  // ── Primary display values ────────────────────────────────────────────────
+  const displayDiagnosis   = useStage2AsPrimary ? result.stage2_diagnosis : (result.diagnosis_name || NAME_MAP[result.diagnosis] || result.diagnosis)
+  const displayConfidence  = useStage2AsPrimary ? result.stage2_confidence : result.confidence
+  const displayRisk        = useStage2AsPrimary ? (result.stage2_risk || 'Moderate Risk') : (result.risk_level || 'Low Risk')
+  const displayShortName   = useStage2AsPrimary ? shortenStage2Name(result.stage2_diagnosis) : displayDiagnosis
+
+  // ── Urgency from risk ─────────────────────────────────────────────────────
+  const urgency = displayRisk === 'High Risk' ? 'high' : displayRisk === 'Moderate Risk' ? 'medium' : 'low'
+  const config  = URGENCY_CONFIG[urgency] || URGENCY_CONFIG['medium']
+  const Icon    = config.icon
+
+  // ── Diagnosis message (Stage 1 key or fallback) ───────────────────────────
+  const diagRaw = (result.diagnosis || 'nv').toLowerCase()
+  const diagKey = diagRaw === 'ak' ? 'akiec' : diagRaw === 'scc' ? 'scc' : ['mel','bcc','akiec','bkl','df','nv','vasc'].includes(diagRaw) ? diagRaw : null
+  const diagnosisInfo = useStage2AsPrimary
+    ? DIAGNOSIS_MESSAGES['stage2_default']
+    : (DIAGNOSIS_MESSAGES[diagKey] || DIAGNOSIS_MESSAGES['nv'])
+
+  const confidence = (displayConfidence * 100).toFixed(1)
+  const confLevel  = parseFloat(confidence) >= 80 ? 'high' : parseFloat(confidence) >= 60 ? 'medium' : 'low'
+
+  // Stage 2 secondary display (only when Stage 1 is primary and stage2 exists)
+  const showStage2Secondary = result.using_stage2 && result.stage2_diagnosis && !useStage2AsPrimary
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="my-6">
@@ -119,7 +169,9 @@ const ResultCard = ({ result }) => {
                 <Icon className="w-6 h-6 text-white" />
               </div>
               <div>
-                <p className="text-white/80 text-xs font-semibold uppercase tracking-widest">Analysis Complete</p>
+                <p className="text-white/80 text-xs font-semibold uppercase tracking-widest">
+                  {useStage2AsPrimary ? 'Stage 2 Analysis Complete' : 'Analysis Complete'}
+                </p>
                 <h2 className="text-white text-lg font-bold mt-0.5 leading-tight">{diagnosisInfo.headline}</h2>
               </div>
             </div>
@@ -136,11 +188,21 @@ const ResultCard = ({ result }) => {
         {/* Body */}
         <div className={`${config.bg} p-6 space-y-5`}>
 
+          {/* Stage 2 badge if used as primary */}
+          {useStage2AsPrimary && (
+            <div className="flex items-center gap-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl px-4 py-2.5">
+              <FlaskConical className="w-4 h-4 text-blue-500 flex-shrink-0" />
+              <p className="text-blue-700 dark:text-blue-400 text-xs font-medium">
+                Stage 2 general disease classifier was used — image routed from Stage 1 (low confidence or non-cancerous result)
+              </p>
+            </div>
+          )}
+
           {/* Diagnosis + risk badges */}
           <div className="flex items-center gap-3 flex-wrap">
             <div className="flex items-center gap-2 bg-white dark:bg-gray-800 px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-600 shadow-sm">
               <Microscope className="w-3.5 h-3.5 text-gray-500" />
-              <span className="text-gray-800 dark:text-gray-200 font-semibold text-sm">{diagnosisName}</span>
+              <span className="text-gray-800 dark:text-gray-200 font-semibold text-sm">{displayShortName}</span>
             </div>
             <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border font-semibold text-xs ${config.badgeBg}`}>
               <div className={`w-1.5 h-1.5 rounded-full ${config.riskDot} animate-pulse`} />
@@ -188,6 +250,28 @@ const ResultCard = ({ result }) => {
               <p className="text-sm mt-0.5 opacity-90">{diagnosisInfo.action}</p>
             </div>
           </div>
+
+          {/* Stage 2 secondary result (when Stage 1 is primary) */}
+          {showStage2Secondary && (
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <FlaskConical className="w-4 h-4 text-blue-500" />
+                <p className="text-blue-700 dark:text-blue-400 font-semibold text-sm">Stage 2 — General Disease Analysis</p>
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-gray-800 dark:text-gray-200 font-medium text-sm">{shortenStage2Name(result.stage2_diagnosis)}</span>
+                <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+                  result.stage2_risk === 'High Risk' ? 'bg-red-100 text-red-700' :
+                  result.stage2_risk === 'Low Risk' ? 'bg-emerald-100 text-emerald-700' :
+                  'bg-amber-100 text-amber-700'
+                }`}>{result.stage2_risk || 'Moderate Risk'}</span>
+                <span className="text-gray-500 text-xs">{(result.stage2_confidence * 100).toFixed(1)}% confidence</span>
+              </div>
+              <p className="text-gray-500 dark:text-gray-400 text-xs mt-2 leading-relaxed">
+                A general skin disease analysis was also performed since the primary result had low confidence or appeared non-cancerous.
+              </p>
+            </div>
+          )}
 
           {/* All scores */}
           {result.all_scores && Object.keys(result.all_scores).length > 0 && (
