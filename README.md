@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # 🩺 DermAssist AI — Skin Cancer Screening App
 
 An AI-powered web application that analyzes skin lesion images and gives you an instant risk assessment. Upload a photo from your phone or computer and the AI will tell you whether the lesion looks concerning — and what to do next.

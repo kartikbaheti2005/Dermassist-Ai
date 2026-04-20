@@ -316,6 +316,195 @@ class Stage2SkinModel(nn.Module):
     def forward(self, x):
         return self.backbone(x)
 
+# ============================================================================
+# DermAssist AI — Stage 2 B4+B3 Ensemble Patch
+# ============================================================================
+# Replace / merge the following blocks into your backend/main.py
+#
+# Changes made vs original:
+#   1. Stage2SkinModelB3  — new class (mirrors SkinModelB3 for Stage 1)
+#   2. stage2_b3_model    — new global, loaded from stage2_b3_model.pth
+#   3. load_stage2_b3_model() — new loader function
+#   4. run_stage2()        — updated to use B4+B3 ensemble when B3 is loaded
+#
+# IMPORTANT — file placement in backend/:
+#   stage2_model.pth      ← your existing B4 checkpoint  (unchanged)
+#   stage2_classes.json   ← your existing classes file   (unchanged)
+#   stage2_b3_model.pth   ← NEW B3 checkpoint from the training notebook
+# ============================================================================
+
+
+# ── Paste this AFTER your existing Stage2SkinModel class definition ──────────
+
+class Stage2SkinModelB3(nn.Module):
+    """
+    EfficientNet-B3 companion for Stage 2 general skin disease classification.
+    Matches the output dimension of Stage2SkinModel (B4) so probabilities
+    can be blended: final = 0.55 * B4_probs + 0.45 * B3_probs
+    """
+    def __init__(self, num_classes: int):
+        super().__init__()
+        self.backbone = _timm.create_model('efficientnet_b3', pretrained=False)
+        in_features = self.backbone.classifier.in_features   # 1536
+        self.backbone.classifier = nn.Sequential(
+            nn.Dropout(p=0.4),
+            nn.Linear(in_features, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout(p=0.3),
+            nn.Linear(512, num_classes)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.backbone(x)
+
+
+# ── Add these globals near your other Stage 2 globals ────────────────────────
+
+STAGE2_B3_MODEL_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "stage2_b3_model.pth"
+)
+if not os.path.exists(STAGE2_B3_MODEL_PATH):
+    STAGE2_B3_MODEL_PATH = "stage2_b3_model.pth"
+
+stage2_b3_model = None   # loaded by load_stage2_b3_model()
+
+# Ensemble weights — same ratio as Stage 1 (B4 55%, B3 45%)
+STAGE2_B4_WEIGHT = 0.55
+STAGE2_B3_WEIGHT = 0.45
+
+
+# ── Add this loader function (call it right after load_stage2_model()) ────────
+
+def load_stage2_b3_model():
+    """
+    Load the Stage 2 B3 ensemble companion.
+    Falls back gracefully to B4-only if the file is missing.
+    """
+    global stage2_b3_model
+    if not os.path.exists(STAGE2_B3_MODEL_PATH):
+        print("ℹ️  stage2_b3_model.pth not found — Stage 2 running B4 only")
+        print("   Train the B3 with Stage2_B3_Training.ipynb and place it in backend/")
+        return
+    if STAGE2_CLASSES is None:
+        print("⚠️  STAGE2_CLASSES not set — skipping B3 load")
+        return
+    try:
+        print("⏳ Loading Stage 2 B3 ensemble model...")
+        model = Stage2SkinModelB3(num_classes=len(STAGE2_CLASSES))
+        checkpoint = torch.load(
+            STAGE2_B3_MODEL_PATH, map_location=DEVICE, weights_only=False
+        )
+        # Support both plain state_dict and {'state_dict': ..., 'classes': ...}
+        state = (
+            checkpoint["state_dict"]
+            if isinstance(checkpoint, dict) and "state_dict" in checkpoint
+            else checkpoint
+        )
+        model.load_state_dict(state, strict=True)
+        stage2_b3_model = model.to(DEVICE).eval()
+        print(
+            f"✅ Stage 2 B3 loaded — ensemble ACTIVE "
+            f"(B4×{STAGE2_B4_WEIGHT} + B3×{STAGE2_B3_WEIGHT})"
+        )
+    except Exception as e:
+        print(f"❌ Stage 2 B3 failed to load: {e}")
+        stage2_b3_model = None
+
+
+# Call order in your startup section:
+#   load_stage2_model()       ← already exists
+#   load_stage2_b3_model()    ← ADD THIS LINE right after
+
+
+# ── Replace your existing run_stage2() with this version ─────────────────────
+
+def run_stage2(image_bytes: bytes):
+    """
+    Run Stage 2 general disease classifier.
+
+    Uses B4+B3 weighted ensemble when stage2_b3_model.pth is present,
+    otherwise falls back to B4-only — identical behaviour to Stage 1.
+
+    Returns
+    -------
+    pred_class  : str   — winning class name
+    confidence  : float — winning class probability (0–1)
+    all_scores  : dict  — {class_name: probability} for all 23 classes
+    """
+    if stage2_model is None:
+        return None, 0.0, {}
+
+    try:
+        # ── Shared preprocessing ──────────────────────────────────────────────
+        pil = PILImage.open(io.BytesIO(image_bytes)).convert("RGB")
+        pil = preprocess_phone_photo(pil)   # your existing phone preprocessing
+
+        # B4 uses 300×300, B3 uses 260×260 — define both transforms
+        b4_transform = STAGE2_TRANSFORM     # your existing transform (300×300)
+
+        b3_transform = transforms.Compose([
+            transforms.Resize((260, 260)),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225]
+            ),
+        ])
+
+        # ── B4 inference ──────────────────────────────────────────────────────
+        tensor_b4 = b4_transform(pil).unsqueeze(0).to(DEVICE)
+        with torch.no_grad():
+            b4_probs = torch.softmax(
+                stage2_model(tensor_b4), dim=1
+            ).cpu().numpy()[0]                      # shape: (num_classes,)
+
+        # ── B3 inference (optional) ───────────────────────────────────────────
+        if stage2_b3_model is not None:
+            tensor_b3 = b3_transform(pil).unsqueeze(0).to(DEVICE)
+            with torch.no_grad():
+                b3_probs = torch.softmax(
+                    stage2_b3_model(tensor_b3), dim=1
+                ).cpu().numpy()[0]                  # shape: (num_classes,)
+
+            # Weighted ensemble
+            ensemble_probs = (
+                STAGE2_B4_WEIGHT * b4_probs +
+                STAGE2_B3_WEIGHT * b3_probs
+            )
+            model_tag = f"B4({STAGE2_B4_WEIGHT})+B3({STAGE2_B3_WEIGHT})"
+        else:
+            ensemble_probs = b4_probs
+            model_tag = "B4-only"
+
+        # ── Final prediction ─────────────────────────────────────────────────
+        probs_clean = [safe_float(p) for p in ensemble_probs]
+        idx         = int(np.argmax(probs_clean))
+        pred_class  = STAGE2_CLASSES[idx]
+        confidence  = probs_clean[idx]
+        all_scores  = {
+            STAGE2_CLASSES[i]: safe_float(ensemble_probs[i])
+            for i in range(len(STAGE2_CLASSES))
+        }
+
+        print(f"🔬 Stage 2 [{model_tag}]: {pred_class} | conf={confidence:.3f}")
+        return pred_class, confidence, all_scores
+
+    except Exception as e:
+        print(f"⚠️  Stage 2 failed: {e}")
+        return None, 0.0, {}
+
+
+# ============================================================================
+# STARTUP CALL ORDER — find your startup block in main.py and add line 3:
+#
+#   load_model()               # Stage 1 B4  (already exists)
+#   load_b3_model()            # Stage 1 B3  (already exists)
+#   load_stage2_model()        # Stage 2 B4  (already exists)
+#   load_stage2_b3_model()     # Stage 2 B3  ← ADD THIS
+#
+# ============================================================================
+
 # ── Load model ────────────────────────────────────────────────────────────────
 torch_model = None
 
